@@ -21,13 +21,15 @@ fourier::fourier(const unsigned input_size, const unsigned output_size, const do
                                                     2 * M_PI * rnd0(random_generator)};
 }
 
-std::vector<double> fourier::operator()(const std::vector<double> & gene) const {
-    std::vector<double> res(output_size, 0);
-    for (auto i = 0u; i < output_size; i++)
+gene_c fourier::operator()(const gene_c & gene) const {
+    gene_c res{output_size};
+    for (auto i = 0u; i < output_size; i++) {
+        res[i] = 0;
         for (auto j = 0u; j < input_size; j++)
             for (auto k = 0u; k < func_num; k++) {
                 const cell & cur_cell = transformer[index(i, j, k)];
                 res[i] += cur_cell.a * cos(cur_cell.k * gene[j] + cur_cell.b);
             }
+    }
     return res;
 }

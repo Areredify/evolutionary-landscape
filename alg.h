@@ -6,56 +6,64 @@
 #include <deque>
 #include <sstream>
 #include <unordered_map>
-#include <experimental/filesystem>
-#include <cassert>
+#include <filesystem>
+#include <array>
+
+#include "utils.h"
 
 double rnd0(std::mt19937 &random_generator);
 double rnd1(std::mt19937 &random_generator);
 double nrm0(std::mt19937 &random_generator);
-std::vector<double> rnd1_vec(unsigned len, std::mt19937 &random_generator);
 double sqr(const double x);
 
-double distance(const std::vector<double> & v1,
-                const std::vector<double> & v2);
-double distance2(const std::vector<double> & v1,
-                 const std::vector<double> & v2);
+const auto max_gene_size = 10;
 
-void print_gene(const std::vector<double> & v);
+using gene_c = truncated_array<double, max_gene_size>;
 
-template<class TupType, size_t... I>
-void print(std::ostream & os, TupType& _tup, std::index_sequence<I...>)
+double distance(const gene_c &v1,
+                const gene_c &v2);
+double distance2(const gene_c &v1,
+                 const gene_c &v2);
+gene_c rnd1_vec(unsigned len, std::mt19937 &random_generator);
+
+template <class TupType, size_t... I>
+void print(std::ostream &os, TupType &_tup, std::index_sequence<I...>)
 {
     os << "(";
     (..., (os << (I == 0 ? "" : ",") << std::get<I>(_tup)));
     os << ")";
 }
 
-template<class... T>
-void print(std::ostream & os, const std::tuple<T...>& _tup)
+template <class... T>
+void print(std::ostream &os, const std::tuple<T...> &_tup)
 {
     print(os, _tup, std::make_index_sequence<sizeof...(T)>());
 }
 
-class fitness {
-public:
+class fitness
+{
+  public:
     const unsigned input_size, output_size;
-    virtual std::vector<double> operator()(const std::vector<double> & gene) const = 0;
+    virtual gene_c operator()(const gene_c &gene) const = 0;
 
     fitness(const unsigned input_size, const unsigned output_size)
-        : input_size(input_size), output_size(output_size) {
+        : input_size(input_size), output_size(output_size)
+    {
     }
 
-    fitness(const fitness & f) = default;
-    fitness(fitness && f) = default;
-    fitness& operator=(const fitness& f) = delete;
-    fitness& operator=(fitness&& f) = delete;
+    fitness(const fitness &f) = default;
+    fitness(fitness &&f) = default;
+    fitness &operator=(const fitness &f) = delete;
+    fitness &operator=(fitness &&f) = delete;
 
     virtual ~fitness() = default;
 };
 
-class fourier : public fitness {
-public:
-    struct cell {
+class fourier : public fitness
+{
+  public:
+    struct cell
+    {
         double a, k, b;
     };
 
@@ -66,53 +74,63 @@ public:
 
     fourier(const unsigned input_size, const unsigned output_size, const double power, const unsigned func_num);
 
-    std::vector<double> operator()(const std::vector<double> & gene) const override;
+    gene_c operator()(const gene_c &gene) const override;
 
-    fourier(const fourier & f) = default;
-    fourier(fourier && f) = default;
-    fourier& operator=(const fourier& f) = delete;
-    fourier& operator=(fourier&& f) = delete;
+    fourier(const fourier &f) = default;
+    fourier(fourier &&f) = default;
+    fourier &operator=(const fourier &f) = delete;
+    fourier &operator=(fourier &&f) = delete;
 
     virtual ~fourier() = default;
 };
 
-class organism {
-public:
-    std::vector<double> gene;
-    std::vector<double> t_gene;
-    std::vector<std::shared_ptr<organism>> ancestors;
+const auto max_ancestor_size = 10;
+class organism
+{
+  public:
+    gene_c gene;
+    gene_c t_gene;
+    truncated_array<organism *, max_ancestor_size> ancestors;
 
-    std::shared_ptr<organism> k_ancestor;
+    organism *k_ancestor;
 
     organism() = default;
-    explicit organism(std::vector<double> gene) : gene(std::move(gene)) {
-    }
+    //explicit organism(gene_c gene) : gene(gene) {
+    //}
 };
 
-typedef std::vector<std::shared_ptr<organism>> org_vec;
+//typedef std::vector<std::shared_ptr<organism>> org_vec;
 
-class population {
-public:
+class population
+{
+  public:
     const double m, v;
-    const fitness& fitness_func;
+    const fitness &fitness_func;
     const unsigned size;
     const unsigned ancestor_size;
     unsigned speed_scale;
-    std::vector<std::shared_ptr<organism>> pop;
+    std::vector<organism> pop_storage;
+    unsigned cur_pop_row;
+    organism *cur_pop;
     std::vector<double> speed_reference;
-    unsigned * epoch;
+    unsigned *epoch;
 
-    population(const double m, const double v, const fitness & fitness_func,
-               const unsigned size, const unsigned ancestor_size, 
-               const unsigned speed_scale, std::vector<std::shared_ptr<organism>> pop) :
-    m(m), v(v), fitness_func(fitness_func), size(size), ancestor_size(ancestor_size), speed_scale(speed_scale),
-    pop(std::move(pop)), speed_reference(ancestor_size), epoch(nullptr) {
+    population(const double m, const double v, const fitness &fitness_func,
+               const unsigned size, const unsigned ancestor_size,
+               const unsigned speed_scale, std::vector<organism> pop_storage) : m(m), v(v), fitness_func(fitness_func), size(size), ancestor_size(ancestor_size), speed_scale(speed_scale),
+                                                                                pop_storage(std::move(pop_storage)), cur_pop_row(0), speed_reference(ancestor_size), epoch(nullptr)
+    {
+        this->pop_storage.resize(size * (ancestor_size + 1), {{this->pop_storage[0].gene.size}, {this->pop_storage[0].t_gene.size}, this->pop_storage[0].ancestors.size, nullptr});
+        cur_pop = get_cur_pop();
+
         std::mt19937 gen(std::random_device{}());
-        const auto iters = 1000000u;
+        const auto iters = 10000u;
 
-        for (auto i = 0u; i < iters; i++) {
+        for (auto i = 0u; i < iters; i++)
+        {
             double sum = 0;
-            for (auto j = 0u; j < ancestor_size; j++) {
+            for (auto j = 0u; j < ancestor_size; j++)
+            {
                 if (rnd0(gen) < m)
                     sum += nrm0(gen) * v;
                 speed_reference[j] += sqr(sum);
@@ -123,69 +141,90 @@ public:
             i = i / iters * fitness_func.input_size;
     }
 
-    auto min_max() {
-        auto mn = pop[0]->t_gene, mx = pop[0]->t_gene;
+    organism *get_cur_pop()
+    {
+        return pop_storage.data() + size * cur_pop_row;
+    }
 
-        for (auto & i : pop) {
-            auto& t_gene = i->t_gene;
-            for (auto j = 0u; j < fitness_func.output_size; j++) {
+    void advance_pop()
+    {
+        cur_pop_row = (cur_pop_row + 1) % (ancestor_size + 1);
+        cur_pop = get_cur_pop();
+    }
+
+    auto min_max()
+    {
+        const auto cur_pop = get_cur_pop();
+
+        auto mn = cur_pop[0].t_gene, mx = cur_pop[0].t_gene;
+
+        for (auto i = 1u; i < size; i++)
+        {
+            auto &t_gene = cur_pop[i].t_gene;
+            for (auto j = 0u; j < fitness_func.output_size; j++)
+            {
                 mn[j] = std::min(mn[j], t_gene[j]);
                 mx[j] = std::max(mx[j], t_gene[j]);
             }
         }
 
-        return std::tuple{ mn, mx };
+        return std::tuple{mn, mx};
     }
 
-    std::vector<double> labeling( const std::vector<double>& mn, const std::vector<double>& mx) {
+    std::vector<double> labeling(const gene_c &mn, const gene_c &mx) const
+    {
         const unsigned power = 15;
         std::vector<double> discrete_representation(static_cast<unsigned>(pow(power, fitness_func.output_size) + 0.1));
 
-        for (auto & i : pop) {
+        for (auto i = 0u; i < size; i++)
+        {
             unsigned current_index = 0;
-            auto& t_gene = i->t_gene;
-            for (auto j = 0u; j < fitness_func.output_size; j++) {
+            auto &t_gene = cur_pop[i].t_gene;
+            for (auto j = 0u; j < fitness_func.output_size; j++)
+            {
                 auto x = static_cast<unsigned>((t_gene[j] - mn[j] - 1e-6) / (mx[j] - mn[j]) * power);
                 current_index = current_index * power + x;
             }
-            discrete_representation[current_index] += 1.0 / pop.size();
+            discrete_representation[current_index] += 1.0 / size;
         }
 
         return discrete_representation;
     }
 
-    double pop_speed() {
+    double pop_speed()
+    {
         double speed = 0;
 
-        for (auto & i : pop)
-            if (i->k_ancestor != nullptr)
-                speed += distance2(i->gene, i->k_ancestor->gene);
+        for (auto i = 0u; i < size; i++)
+            if (cur_pop[i].k_ancestor != nullptr)
+                speed += distance2(cur_pop[i].gene, cur_pop[i].k_ancestor->gene);
 
-        return speed / pop.size() / speed_reference[std::min(ancestor_size, speed_scale) - 1];
+        return speed / size / speed_reference[std::min(ancestor_size, speed_scale) - 1];
     }
 
-    double pop_dispersion() {
-        std::vector<double> center(fitness_func.input_size);
+    double pop_dispersion()
+    {
+        gene_c center{fitness_func.input_size};
 
-        for (auto & i : pop) {
+        for (auto i = 0u; i < size; i++)
+        {
             for (auto j = 0u; j < fitness_func.input_size; j++)
-                center[j] += i->gene[j];
+                center[j] += cur_pop[i].gene[j];
         }
 
-        for (auto & i : center)
-            i /= size;
+        for (auto i = 0u; i < fitness_func.input_size; i++)
+            center[i] /= size;
 
         double res = 0;
 
-        for (auto & i : pop)
-            res += distance2(center, i->gene);
+        for (auto i = 0u; i < size; i++)
+            res += distance2(center, cur_pop[i].gene);
 
         return res / size;
     }
 
-    std::string stats() {
-        
-
+    std::string stats()
+    {
         std::ostringstream oss;
 
         oss << pop_speed() << " " << pop_dispersion();
@@ -193,103 +232,110 @@ public:
         return oss.str();
     }
 
-    friend std::ostream& operator<<(std::ostream & stream, const population& pop);
+    friend std::ostream &operator<<(std::ostream &stream, const population &pop);
 
-    std::shared_ptr<organism> make_offspring(const std::shared_ptr<organism> o, std::mt19937 &random_generator) {
-        auto res = std::make_shared<organism>(o->gene);
+    void make_offspring(organism *o, organism *output, std::mt19937 &random_generator) const
+    {
 
         auto flag = false;
-        for (auto &i : res->gene)
-            if (rnd0(random_generator) < m) {
+        for (auto i = 0u; i < output->gene.size; i++)
+            if (rnd0(random_generator) < m)
+            {
                 flag = true;
-                i += nrm0(random_generator) * v;
+                output->gene[i] += nrm0(random_generator) * v;
             }
 
         if (flag)
-            res->t_gene = fitness_func(res->gene);
+            output->t_gene = fitness_func(output->gene);
         else
-            res->t_gene = o->t_gene;
+            output->t_gene = o->t_gene;
 
         unsigned cur_ind = 0;
         auto cur_ptr = o;
-        res->ancestors.resize(o->ancestors.size());
 
-        for (auto & i : res->ancestors) {
+        for (auto i = 0u; i < output->ancestors.size; i++)
+        {
             if (cur_ptr == nullptr)
                 break;
 
-            i = cur_ptr;
+            output->ancestors[i] = cur_ptr;
             cur_ptr = cur_ptr->ancestors[cur_ind++];
         }
 
         cur_ind = 0;
-        cur_ptr = res;
+        cur_ptr = output;
 
         for (auto k = std::min(ancestor_size, *epoch); k > 0; k /= 2, cur_ind++)
             if (k & 1)
                 cur_ptr = cur_ptr->ancestors[cur_ind];
-        res->k_ancestor = cur_ptr;
-
-        return res;
+        output->k_ancestor = cur_ptr;
     }
 };
 
-class simulation {
-public:
+class simulation
+{
+  public:
     population &bacteria_pop, &plant_pop;
     unsigned generations;
 
-    std::experimental::filesystem::path out_path;
+    std::filesystem::path out_path;
 
     double get_similarity() const;
-    double get_distance(std::mt19937 & random_generator) const;
+    double get_distance(std::mt19937 &random_generator) const;
 
     static double get_prob(double mean);
     void evolve(std::mt19937 &random_generator);
     void run();
 };
 
-template< class InputIt >
+template <class InputIt>
 std::vector<InputIt> KMax(unsigned k, InputIt first, InputIt last)
 {
-    class comparator {
-    public:
-      bool operator()(const InputIt & first, const InputIt & last) const {
-          return *first < *last;
-      }
+    class comparator
+    {
+      public:
+        bool operator()(const InputIt &first, const InputIt &last) const
+        {
+            return *first < *last;
+        }
     } foo;
-    
+
     std::multiset<InputIt, comparator> res(foo);
-    for (InputIt i = first; i != last; ++i) {
+    for (InputIt i = first; i != last; ++i)
+    {
         res.insert(i);
         if (res.size() > k)
             res.erase(res.begin());
-    } 
+    }
     return std::vector<InputIt>(res.begin(), res.end());
 }
 
-template< class InputIt >
+template <class InputIt>
 std::vector<InputIt> KMin(unsigned k, InputIt first, InputIt last)
 {
-    class comparator {
-    public:
-        bool operator()(const InputIt & first, const InputIt & last) const {
+    class comparator
+    {
+      public:
+        bool operator()(const InputIt &first, const InputIt &last) const
+        {
             return *first > *last;
         }
     } foo;
 
     std::multiset<InputIt, comparator> res(foo);
-    for (auto i = first; i != last; ++i) {
-      res.insert(i);
-      if (res.size() > k)
-        res.erase(res.begin());
+    for (auto i = first; i != last; ++i)
+    {
+        res.insert(i);
+        if (res.size() > k)
+            res.erase(res.begin());
     }
 
     return std::vector<InputIt>(res.begin(), res.end());
 }
 
-class simulation_params {
-public:
+class simulation_params
+{
+  public:
     unsigned generations;
     unsigned b_gene_size, p_gene_size;
     unsigned inter_size;
@@ -297,14 +343,16 @@ public:
 
     double bv, bm, pv, pm;
 
-    std::experimental::filesystem::path out_path;
+    std::filesystem::path out_path;
 };
 
-template <class T, class Func>
-auto itemwise_func(const std::vector<T> & v1, const std::vector<T> & v2, Func f) {
-    std::vector<T> res(v1.size());
+template <class Func>
+auto itemwise_func(const gene_c &v1, const gene_c &v2, Func f)
+{
+    gene_c res;
+    res.size = v1.size;
 
-    for (auto i = 0u; i < v1.size(); i++)
+    for (auto i = 0u; i < v1.size; i++)
         res[i] = f(v1[i], v2[i]);
 
     return res;
